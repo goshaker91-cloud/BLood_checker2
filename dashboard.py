@@ -8,7 +8,8 @@ import re
 from docx import Document
 
 # ========== CONFIGURATION ==========
-CLINIKO_API_KEY = "MS0xOTE4MDQ3NDM0ODIzNDM5NjEyLU9wTTNZMks2S2xvZitxUkJzdWNjcGZGUHQ4TUV3dUpt-uk1"
+# Get API key from Streamlit secrets
+CLINIKO_API_KEY = st.secrets["CLINIKO_API_KEY"]
 CLINIKO_SHARD = "au1"                   # Change if your shard is eu1, us1, etc.
 CLINIKO_BASE_URL = f"https://api.{CLINIKO_SHARD}.cliniko.com/v1"
 
@@ -58,7 +59,7 @@ def extract_results(docx_path):
     return results
 
 def search_cliniko_patient(nhs_number=None, first_name=None, last_name=None):
-    credentials = f"{'MS0xOTE4MDQ3NDM0ODIzNDM5NjEyLU9wTTNZMks2S2xvZitxUkJzdWNjcGZGUHQ4TUV3dUpt-uk1'}:"
+    credentials = f"{CLINIKO_API_KEY}:"
     encoded = base64.b64encode(credentials.encode()).decode()
     headers = {
         "Authorization": f"Basic {encoded}",
@@ -86,6 +87,34 @@ def search_cliniko_patient(nhs_number=None, first_name=None, last_name=None):
     except Exception as e:
         st.error(f"Cliniko error: {e}")
     return None
+
+def create_cliniko_note(patient_id, note_content, note_type="Clinical note"):
+    """
+    Create a clinical note for a patient in Cliniko.
+    """
+    credentials = f"{CLINIKO_API_KEY}:"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    headers = {
+        "Authorization": f"Basic {encoded}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Blood Results Checker (your-email@example.com)"
+    }
+    payload = {
+        "note": note_content,
+        "type": note_type
+    }
+    url = f"{CLINIKO_BASE_URL}/patients/{patient_id}/notes"
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            st.error(f"Failed to create note: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        st.error(f"Error creating note: {e}")
+        return False
 
 def init_db():
     conn = sqlite3.connect('blood_reviews.db')
@@ -165,3 +194,19 @@ if uploaded_file:
     if st.button("Save review"):
         save_review(patient_info, len(abnormal), plan)
         st.success("Review saved locally.")
+
+    # New: Push to Cliniko button
+    if st.button("Push plan to Cliniko"):
+        if cliniko_patient:
+            note_text = "Blood results review:\n"
+            note_text += "Abnormal results:\n"
+            for r in abnormal:
+                note_text += f"- {r['test']}: {r['result']} {r['unit']} (ref {r['reference']})\n"
+            note_text += f"\nPlan: {plan}"
+            success = create_cliniko_note(cliniko_patient['id'], note_text)
+            if success:
+                st.success("Plan pushed to Cliniko as a clinical note.")
+            else:
+                st.error("Failed to push plan to Cliniko.")
+        else:
+            st.warning("No patient matched in Cliniko. Cannot push note.")
